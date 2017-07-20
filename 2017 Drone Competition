@@ -1,0 +1,1935 @@
+using System;
+using System.Collections.Generic;
+using System.Runtime.InteropServices.WindowsRuntime;
+using System.Threading.Tasks;
+using System.Threading;
+using System.Windows.Forms;
+using System.Diagnostics;
+using System.ComponentModel;
+
+using Windows.Devices.Bluetooth.GenericAttributeProfile;
+using Windows.Devices.Enumeration;
+using Windows.Foundation;
+
+using showfigure;
+using MathWorks.MATLAB.NET.Arrays;
+using MathWorks.MATLAB.NET.Utility;
+using Emgu.CV;
+using Emgu.CV.Structure;
+using Emgu.CV.CvEnum;
+using Emgu.CV.Util;
+using System.Linq;
+using System.Text;
+using System.Drawing;
+using System.Data;
+
+
+
+namespace BLE_Sample
+{
+
+    public partial class mainForm : Form
+    {
+
+        #region #################################################### 드론  #####################
+        #region Enum Region
+        enum DataType
+        {
+            None = 0,
+            // 시스템 정보
+            Ping, ///< 통신 확인(reserve)
+            Ack, ///< 데이터 수신에 대한 응답
+            Error, ///< 오류(reserve, 비트 플래그는 추후에 지정)
+            Request, ///< 지정한 타입의 데이터 요청
+            Passcode, ///< 새로운 페어링 비밀 번호(페어링 비밀 번호 변경 시 사용)
+            // 조종, 명령
+            Control = 0x10, ///< 조종
+            Command, ///< 명령
+            Command2, ///< 다중 명령(2가지 설정을 동시에 변경)
+            Command3, ///< 다중 명령(3가지 설정을 동시에 변경)
+            // LED
+            LedMode = 0x20, ///< LED 모드 지정
+            LedMode2, ///< LED 모드 2개 지정
+            LedModeCommand, ///< LED 모드, 커맨드
+            LedModeCommandIr, ///< LED 모드, 커맨드, IR 데이터 송신
+            LedModeColor, ///< LED 모드 3색 직접 지정
+            LedModeColor2, ///< LED 모드 3색 직접 지정 2개
+            LedEvent, ///< LED 이벤트
+            LedEvent2, ///< LED 이벤트 2개,
+            LedEventCommand, ///< LED 이벤트, 커맨드
+            LedEventCommandIr, ///< LED 이벤트, 커맨드, IR 데이터 송신
+            LedEventColor, ///< LED 이벤트 3색 직접 지정
+            LedEventColor2, ///< LED 이벤트 3색 직접 지정 2개
+            LedModeDefaultColor, ///< LED 초기 모드 3색 직접 지정
+            LedModeDefaultColor2, ///< LED 초기 모드 3색 직접 지정 2개
+
+            // 상태
+            Address = 0x30, ///< IEEE address
+            State, ///< 드론의 상태(비행 모드, 방위기준, 배터리량)
+            Attitude, ///< 드론의 자세
+            GyroBias, ///< 자이로 바이어스 값
+            TrimAll, ///< 전체 트림
+            TrimFlight, ///< 비행 트림
+            TrimDrive, ///< 주행 트림
+            // 데이터 송수신
+            IrMessage = 0x40, ///< IR 데이터 송수신
+            EndOfType
+        }
+        enum CommandType
+        {
+            None = 0, ///< 이벤트 없음
+            // 설정
+            ModePetrone = 0x10, ///< 페트론 동작 모드 전환
+            // 제어
+            Coordinate = 0x20, ///< 방위 기준 변경
+            Trim, ///< 트림 변경
+            FlightEvent, ///< 비행 이벤트 실행
+            DriveEvent, ///< 주행 이벤트 실행
+            Stop, ///< 정지
+            ResetHeading = 0x50, ///< 방향을 리셋(앱솔루트 모드 일 때 현재 heading을 0도로 변경)
+            ClearGyroBiasAndTrim, ///< 자이로 바이어스와 트림 설정 초기화
+
+            //통신
+            PairingActivate = 0x80, ///< 페어링 활성화
+            PairingDeactivate, ///< 페어링 비활성화
+            TerminateConnection, ///< 연결 종료
+            // 요청
+            Request = 0x90, ///< 지정한 타입의 데이터 요청
+            EndOfType
+        };
+        enum ModePetrone
+        {
+            None = 0,
+            Flight = 0x10, ///< 비행 모드(가드 포함)
+            FlightNoGuard, ///< 비행 모드(가드 없음)
+            FlightFPV, ///< 비행 모드(FPV)
+            Drive = 0x20, ///< 주행 모드
+            DriveFPV, ///< 주행 모드(FPV)
+            Test = 0x30, ///< 테스트 모드
+            EndOfType
+        };
+        enum Coordinate
+        {
+            None = 0,
+            Absolute, ///< 고정 좌표계
+            Relative, ///< 상대 좌표계
+            EndOfType
+        };
+        enum Trim
+        {
+            None = 0,
+            RollIncrease, ///< Roll 증가
+            RollDecrease, ///< Roll 감소
+            PitchIncrease, ///< Pitch 증가
+            PitchDecrease, ///< Pitch 감소
+            YawIncrease, ///< Yaw 증가
+            YawDecrease, ///< Yaw 감소
+            ThrottleIncrease, ///< Throttle 증가
+            ThrottleDecrease, ///< Throttle 감소
+            EndOfType
+        };
+        enum FlightEvent
+        {
+            None = 0,
+            TakeOff, ///< 이륙
+            FlipFront, ///< 회전
+            FlipRear, ///< 회전
+            FlipLeft, ///< 회전
+            FlipRight, ///< 회전
+            Stop, ///< 정지
+            Landing, ///< 착륙
+            Reverse, ///< 뒤집기
+            Shot, ///< 미사일을 쏠 때 움직임
+            UnderAttack, ///< 미사일을 맞을 때 움직임
+            Square, ///< 정방향 돌기
+            CircleLeft, ///< 왼쪽으로 회전
+            CircleRight, ///< 오른쪽으로 회전
+            Rotate180, ///< 180도 회전
+            EndOfType
+        };
+        enum Request
+        {
+            // 상태
+            Address = 0x30, ///< IEEE address
+            State, ///< 드론의 상태(비행 모드, 방위기준, 배터리량)
+            Attitude, ///< 드론의 자세(Vector)
+            GyroBias, ///< 자이로 바이어스 값(Vector)
+            TrimAll, ///< 전체 트림
+            TrimFlight, ///< 비행 트림
+            TrimDrive, ///< 주행 트림
+        };
+
+        enum LEDMode
+        {
+            None = 0,
+            EyeNone = 0x10,
+            EyeHold, ///< 지정한 색상을 계속 켬
+            EyeMix, ///< 순차적으로 LED 색 변경
+            EyeFlicker, ///< 깜빡임
+            EyeFlickerDouble, ///< 깜빡임(두 번 깜빡이고 깜빡인 시간만큼 꺼짐)
+            EyeDimming, ///< 밝기 제어하여 천천히 깜빡임
+            ArmNone = 0x40,
+            ArmHold, ///< 지정한 색상을 계속 켬
+            ArmMix, ///< 순차적으로 LED 색 변경
+            ArmFlicker, ///< 깜빡임
+            ArmFlickerDouble, ///< 깜빡임(두 번 깜빡이고 깜빡인 시간만큼 꺼짐)
+            ArmDimming, ///< 밝기 제어하여 천천히 깜빡임
+            ArmFlow, ///< 앞에서 뒤로 흐름
+            ArmFlowReverse, ///< 뒤에서 앞으로 흐름
+            EndOfType
+        };
+        enum Colors
+        {
+            AliceBlue, AntiqueWhite, Aqua,
+            Aquamarine, Azure, Beige,
+            Bisque, Black, BlanchedAlmond,
+            Blue, BlueViolet, Brown,
+            BurlyWood, CadetBlue, Chartreuse,
+            Chocolate, Coral, CornflowerBlue,
+            Cornsilk, Crimson, Cyan,
+            DarkBlue, DarkCyan, DarkGoldenRod,
+            DarkGray, DarkGreen, DarkKhaki,
+            DarkMagenta, DarkOliveGreen, DarkOrange,
+            DarkOrchid, DarkRed, DarkSalmon,
+            DarkSeaGreen, DarkSlateBlue, DarkSlateGray,
+            DarkTurquoise, DarkViolet, DeepPink,
+            DeepSkyBlue, DimGray, DodgerBlue,
+            FireBrick, FloralWhite, ForestGreen,
+            Fuchsia, Gainsboro, GhostWhite,
+            Gold, GoldenRod, Gray,
+            Green, GreenYellow, HoneyDew,
+            HotPink, IndianRed, Indigo,
+            Ivory, Khaki, Lavender,
+            LavenderBlush, LawnGreen, LemonChiffon,
+            LightBlue, LightCoral, LightCyan,
+            LightGoldenRodYellow, LightGray, LightGreen,
+            LightPink, LightSalmon, LightSeaGreen,
+            LightSkyBlue, LightSlateGray, LightSteelBlue,
+            LightYellow, Lime, LimeGreen,
+            Linen, Magenta, Maroon,
+            MediumAquaMarine, MediumBlue, MediumOrchid,
+            MediumPurple, MediumSeaGreen, MediumSlateBlue,
+            MediumSpringGreen, MediumTurquoise, MediumVioletRed,
+            MidnightBlue, MintCream, MistyRose,
+            Moccasin, NavajoWhite, Navy,
+            OldLace, Olive, OliveDrab,
+            Orange, OrangeRed, Orchid,
+            PaleGoldenRod, PaleGreen, PaleTurquoise,
+            PaleVioletRed, PapayaWhip, PeachPuff,
+            Peru, Pink, Plum,
+            PowderBlue, Purple, RebeccaPurple,
+            Red, RosyBrown, RoyalBlue,
+            SaddleBrown, Salmon, SandyBrown,
+            SeaGreen, SeaShell, Sienna,
+            Silver, SkyBlue, SlateBlue,
+            SlateGray, Snow, SpringGreen,
+            SteelBlue, Tan, Teal,
+            Thistle, Tomato, Turquoise,
+            Violet, Wheat, White,
+            WhiteSmoke, Yellow, YellowGreen,
+            EndOfType
+        };
+        enum ModeFlight
+        {
+            None = 0,
+            Ready, ///< 비행 준비
+            TakeOff, ///< 이륙 (Flight로 자동전환)
+            Flight, ///< 비행
+            Flip, ///< 회전
+            Stop, ///< 강제 정지
+            Landing, ///< 착륙
+            Reverse, ///< 뒤집기
+            Accident, ///< 사고 (Ready로 자동전환)
+            Error, ///< 오류
+            EndOfType
+        };
+        enum ModeDrive
+        {
+            None = 0,
+            Ready, ///< 준비
+            Start, ///< 출발
+            Drive, ///< 주행Stop, ///< 강제 정지
+            Accident, ///< 사고 (Ready로 자동전환)
+            Error, ///< 오류
+            EndOfType
+        };
+        enum SensorOrientation
+        {
+            None = 0,
+            Normal, ///< 정상
+            ReverseStart, ///< 뒤집히기 시작
+            Reverse, ///< 뒤집힘
+            EndOfType
+        };
+        #endregion
+        #region Variables Region
+        DeviceInformationCollection m_Ble_Profile_List;
+        GattDeviceService m_Ble_Service;
+        IReadOnlyList<GattCharacteristic> m_Ble_Characteristic_List;
+
+        const String PETRONE_CUSTOM_SERVICE_UUID = "C320DF00-7891-11E5-8BCF-FEFF819CDC9F";
+
+        #endregion
+        #region initialize Region
+        public mainForm()
+        {
+            InitializeComponent();
+            CheckForIllegalCrossThreadCalls = false;
+
+            mKalmanFilterX = new KalmanFilter(0.0f);
+            mKalmanFilterY = new KalmanFilter(0.0f);
+            mKalmanFilterZ = new KalmanFilter(0.0f);
+        }
+        private void Form1_Load(object sender, EventArgs e)
+        {
+            ButtonEnableControl(false);
+        }
+        #endregion
+        #region Connect Reigon
+        private async void Connect_Click(object sender, EventArgs e)
+        {
+            await ScanPetrone();
+        }
+        private async Task ScanPetrone()
+        {
+            // Get Petrone Device List as Custom Service UUID 
+            m_Ble_Profile_List = await DeviceInformation.FindAllAsync(GattDeviceService.GetDeviceSelectorFromUuid(new Guid(PETRONE_CUSTOM_SERVICE_UUID)));
+
+            PetorneDeviceListBox.Items.Clear();
+            foreach (var m_Ble_Profile in m_Ble_Profile_List)
+            {
+                PetorneDeviceListBox.Items.Add("[" + m_Ble_Profile.Name + "]");
+            }
+        }
+        private async void PetroneDeviceListBox_SelectedIndexChanged(object sender, EventArgs e)
+        {
+
+            if (PetorneDeviceListBox.SelectedIndex != -1)
+            {
+                // m_Ble_Profile_List Service is composed of only Custom Service 
+                m_Ble_Service = await GattDeviceService.FromIdAsync(m_Ble_Profile_List[PetorneDeviceListBox.SelectedIndex].Id);
+                m_Ble_Characteristic_List = m_Ble_Service.GetAllCharacteristics();
+                m_Ble_Characteristic_List[0].ValueChanged += Value_Changed_Event_Handler;
+                await m_Ble_Characteristic_List[0].WriteClientCharacteristicConfigurationDescriptorAsync(GattClientCharacteristicConfigurationDescriptorValue.Notify);
+
+                // Print Characteristics in a List Box
+                charListBox.Items.Clear();
+                charListBox.Items.Add(m_Ble_Service.Device.Name);
+                foreach (var m_Ble_Characteristic in m_Ble_Characteristic_List)
+                {
+                    charListBox.Items.Add(m_Ble_Characteristic.Uuid.ToString());
+                }
+                ButtonEnableControl(true);
+            }
+        }
+        #endregion
+        #region Command Transfer Region
+        // Command transfer of a byte array format.
+        private async void TransferBleCommand(byte[] cmd)
+        {
+            // m_Ble_Characteristic_List[0] is C32DF01
+            // m_Ble_Characteristic_List[1] is C32DF02
+            if (m_Ble_Characteristic_List != null)
+                await m_Ble_Characteristic_List[1].WriteValueAsync(cmd.AsBuffer(), GattWriteOption.WriteWithoutResponse);
+
+            // check Rootin : Flag Petrone Busy 
+            // Timer
+        }
+
+        private async void TransferBleNotifyCommand(byte[] cmd)
+        {
+            // m_Ble_Characteristic_List[0] is C32DF01
+            // m_Ble_Characteristic_List[1] is C32DF02
+            if (m_Ble_Characteristic_List != null)
+            {
+                await m_Ble_Characteristic_List[1].WriteValueAsync(cmd.AsBuffer(), GattWriteOption.WriteWithResponse);
+            }
+        }
+        #endregion
+        #region Etc Controller Reigon
+        private void ButtonEnableControl(Boolean type)
+        {
+            btnConnect.Enabled = !type;
+            btnRLED.Enabled = type;
+            btnYLED.Enabled = type;
+            btnCLED.Enabled = type;
+            btnTakeOff.Enabled = type;
+            btnLanding.Enabled = type;
+            btnEmergencyStop.Enabled = type;
+            battery_png.Enabled = type;
+        }
+        #endregion
+
+        #region Command Received Region
+
+        #region >> 변수선언부 
+        int ackTime;
+        int AccX, AccY, AccZ, GyroRoll, GyroPitch, GyroYaw, angleRoll, anglePitch, angleYaw; // IMU Data
+        double sangbo_roll = 0, sangbo_pitch = 0, sangbo_yaw = 0; // 상보필터를 거친 Data
+        double acelAxisX, acelAxisY, acelAxisZ;
+        double gyroAxisX, gyroAxisY, gyroAxisZ;
+        double acelAnglX, acelAnglY, acelAnglZ;
+        double gyroAnglX, gyroAnglY, gyroAnglZ;
+        int temperature, pressure; // 온도,압력센서 값 대입할 변수
+        int landing_flag = 0; // 착륙시 천천하게 내려가게할 flag
+        ulong height = 0; // 드론이 떠있는 높이를 대입할 변수
+        double rad2degree = 57.2957; // 상보필터 : degree 계산에 필요한 변수
+        static double gain = 0.95; // 상보필터 gain
+
+        public KalmanFilter mKalmanFilterX;
+        public KalmanFilter mKalmanFilterY;
+        public KalmanFilter mKalmanFilterZ;
+        float filteredX, filteredY, filteredZ;
+        public int Xval = 0, Yval = 0, Zval = 0;
+
+        public int angle_pink = 0, angle_pink2 = 0, angle_pink_right = 0;
+        public int nextangle;
+        public int right_flag = 0, left_flag = 0;
+
+        ulong height_num = 650;
+        public int mission2_flag = 0;
+        public int pink2_flag = 0;
+        public bool two_line = false;
+
+
+        int sw_flag = 0, count = 0;
+        int up = 10, down = -17;
+        int small_up = 6, small_down = -7;
+        int right = 1, left = -1;
+        int mission_right = 25, mission_left = -25;
+        int go = 1, back = -1;
+        int mission_go = 4;
+        int yaw_right = 50, yaw_left = -50;
+
+        int X_flag = 0;
+        int pitch_how = 0;
+        int direction = 0;
+
+        Stopwatch sw1 = new Stopwatch();
+        Stopwatch sw2 = new Stopwatch();
+        MLApp.MLApp matlab = new MLApp.MLApp(); // 매트랩 실행
+
+        #endregion 
+
+
+        private void Value_Changed_Event_Handler(GattCharacteristic sender, GattValueChangedEventArgs args)
+        {
+
+            byte[] receivedData = new byte[args.CharacteristicValue.Length];
+            receivedData = args.CharacteristicValue.ToArray();
+
+            #region >> 배터리 표시
+            // 드론 배터리 상태
+            if (receivedData[0] == 0x54)
+            {
+                int battery = receivedData[14];
+
+                if (battery <= 25)
+                {
+                    battery_png.ImageLocation = @"C:\Users\김재영\Desktop\20133037_수업자료\Mini Drone 경진대회\2017 워크샵 자료들\Ble_Sample\\20.png";
+                    battery_num.Text = Convert.ToString(battery) + "%";
+                }
+                else if (battery > 25 && battery <= 50)
+                {
+                    battery_png.ImageLocation = @"C:\Users\김재영\Desktop\20133037_수업자료\Mini Drone 경진대회\2017 워크샵 자료들\Ble_Sample\\40.png";
+                    battery_num.Text = Convert.ToString(battery) + "%";
+                }
+                else if (battery > 50 && battery <= 75)
+                {
+                    battery_png.ImageLocation = @"C:\Users\김재영\Desktop\20133037_수업자료\Mini Drone 경진대회\2017 워크샵 자료들\Ble_Sample\\60.png";
+                    battery_num.Text = Convert.ToString(battery) + "%";
+                }
+                else if (battery >= 75)
+                {
+                    battery_png.ImageLocation = @"C:\Users\김재영\Desktop\20133037_수업자료\Mini Drone 경진대회\2017 워크샵 자료들\Ble_Sample\\80.png";
+                    battery_num.Text = Convert.ToString(battery) + "%";
+                }
+            }
+            #endregion
+            #region >> 센서값 : IMU, Pressure & Temperature, ackTime
+            if (receivedData[0] == 0x50)
+            {
+                AccX = BitConverter.ToInt16(receivedData, 1);
+                AccY = BitConverter.ToInt16(receivedData, 3);
+                AccZ = BitConverter.ToInt16(receivedData, 5);
+                GyroRoll = BitConverter.ToInt16(receivedData, 7);
+                GyroPitch = BitConverter.ToInt16(receivedData, 9);
+                GyroYaw = BitConverter.ToInt16(receivedData, 11);
+                angleRoll = BitConverter.ToInt16(receivedData, 13);
+                anglePitch = BitConverter.ToInt16(receivedData, 15);
+                angleYaw = BitConverter.ToInt16(receivedData, 17);
+
+                Xval = angleRoll;
+                Yval = anglePitch;
+                Zval = angleYaw;
+            }
+
+            // 드론의 압력 센서값
+            if (receivedData[0] == 0x51)
+            {
+                temperature = BitConverter.ToInt32(receivedData, 9);
+                pressure = BitConverter.ToInt32(receivedData, 13);
+            }
+
+            // 드론의 고도센서값
+            if (receivedData[0] == 0x57)
+            {
+                height = BitConverter.ToUInt16(receivedData, 11);
+            }
+
+            if (receivedData[0] == 0x02)
+            {
+                ackTime = BitConverter.ToInt32(receivedData, 1);
+            }
+            #endregion
+            #region >> 상보필터 변수 & 계산 
+            // 상보필터 계산에 필요한 변수
+            sangbo_roll = angleRoll;
+            sangbo_pitch = anglePitch;
+            sangbo_yaw = angleYaw;
+
+            acelAxisX = AccX;
+            acelAxisY = AccY;
+            acelAxisZ = AccZ;
+            gyroAxisX = GyroRoll;
+            gyroAxisY = GyroPitch;
+            gyroAxisZ = GyroYaw;
+
+            acelAnglX = (double)Math.Atan2(acelAxisX, Math.Sqrt(Math.Pow(acelAxisY, 2) + Math.Pow(acelAxisZ, 2))) * rad2degree;
+            acelAnglY = (double)Math.Atan2(acelAxisY, Math.Sqrt(Math.Pow(acelAxisX, 2) + Math.Pow(acelAxisZ, 2))) * rad2degree;
+            acelAnglZ = (double)Math.Atan2(Math.Sqrt(Math.Pow(acelAnglX, 2) + Math.Pow(acelAnglY, 2)), acelAnglZ) * rad2degree;
+
+            gyroAnglX = sangbo_roll + (gyroAxisX / 131 * 0.001);
+            gyroAnglY = sangbo_pitch + (gyroAxisY / 131 * 0.001);
+            gyroAnglZ = sangbo_yaw + (gyroAxisZ / 131 * 0.001);
+
+            // 상보필터
+            sangbo_roll = (gyroAnglX * gain) + (acelAnglX * (1 - gain));
+            sangbo_pitch = (gyroAnglY * gain) + (acelAnglY * (1 - gain));
+            sangbo_yaw = gyroAnglZ % 360;
+            #endregion
+
+            #region >> 칼만필터 변수 & 계산
+
+            filteredX = (float)mKalmanFilterX.Update((double)Xval);
+            filteredY = (float)mKalmanFilterY.Update((double)Yval);
+            filteredZ = (float)mKalmanFilterZ.Update((double)Zval);
+
+            #endregion << 칼만필터 변수 & 계산
+
+            //// 차트변수에 센서값 대입
+            //IMU_Roll.Points.Add(angleRoll);
+            //IMU_Pitch.Points.Add(anglePitch);
+            //IMU_Yaw.Points.Add(angleYaw);
+            //Filter_Roll.Points.Add(sangbo_roll);
+            //Filter_Pitch.Points.Add(sangbo_pitch);
+            //Filter_Yaw.Points.Add(sangbo_yaw);
+
+            // 출력부
+            Init();
+        }
+
+        // UI에 보이는 값 표시
+        private void Init()
+        {
+            // 센서값
+            button8.Text = "AccX : " + Convert.ToString(AccX);
+            button12.Text = "AccY : " + Convert.ToString(AccY);
+            button14.Text = "AccZ : " + Convert.ToString(AccZ);
+            button16.Text = "GyroRoll : " + Convert.ToString(GyroRoll);
+            button18.Text = "GyroPitch : " + Convert.ToString(GyroPitch);
+            button17.Text = "GyroYaw : " + Convert.ToString(GyroYaw);
+            button15.Text = "angleRoll : " + Convert.ToString(angleRoll);
+            button13.Text = "anglePitch : " + Convert.ToString(anglePitch);
+            button9.Text = "angleYaw : " + Convert.ToString(angleYaw);
+            button10.Text = "temperature : " + Convert.ToString(temperature);
+            button11.Text = "pressure : " + Convert.ToString(pressure);
+
+            Fillter_Roll.Text = "Fillter_Roll : " + Convert.ToString((int)filteredX);
+            Fillter_Pitch.Text = "Fillter_Pitch : " + Convert.ToString((int)filteredY);
+            Fillter_Yaw.Text = "Fillter_Yaw : " + Convert.ToString((int)filteredZ);
+
+        }
+
+
+        #region Command Transfer Sample Reigon
+
+        private void btnRLED_Click(object sender, EventArgs e)
+        {
+            TransferBleCommand(new byte[] { (byte)DataType.LedMode, (byte)LEDMode.ArmDimming, (byte)Colors.Red, 0x05 });
+            TransferBleCommand(new byte[] { (byte)DataType.LedMode, (byte)LEDMode.EyeDimming, (byte)Colors.Red, 0x05 });
+            LogTextBox.Clear();
+            LogTextBox.AppendText("LED COLOR    : RED =>" + (byte)Colors.Red + " \n");
+        }
+        private void btnYLED_Click(object sender, EventArgs e)
+        {
+            TransferBleCommand(new byte[] { (byte)DataType.LedMode, (byte)LEDMode.ArmDimming, (byte)Colors.Yellow, 0x05 });
+            TransferBleCommand(new byte[] { (byte)DataType.LedMode, (byte)LEDMode.EyeDimming, (byte)Colors.Yellow, 0x05 });
+            LogTextBox.Clear();
+            LogTextBox.AppendText("LED COLOR    : YELLOW=>" + (byte)Colors.Yellow + " \n");
+        }
+        private void btnCLED_Click(object sender, EventArgs e)
+        {
+            TransferBleCommand(new byte[] { (byte)DataType.LedMode, (byte)LEDMode.ArmDimming, (byte)Colors.Cyan, 0x05 });
+            TransferBleCommand(new byte[] { (byte)DataType.LedMode, (byte)LEDMode.EyeDimming, (byte)Colors.Cyan, 0x05 });
+            LogTextBox.Clear();
+            LogTextBox.AppendText("LED COLOR    : CYAN=>" + (byte)Colors.Cyan + " \n");
+        }
+
+        private void button4_Click(object sender, EventArgs e)
+        {
+            int m_go = 10;
+            TransferBleCommand(new byte[] { 0x10, 0x00, (byte)m_go, 0x00, 0x00 });
+        }
+
+        private void button5_Click(object sender, EventArgs e)
+        {
+            int m_left = -10;
+            TransferBleCommand(new byte[] { 0x10, (byte)m_left, 0x00, 0x00, 0x00 });
+        }
+
+        private void button6_Click(object sender, EventArgs e)
+        {
+            int m_right = 10;
+            TransferBleCommand(new byte[] { 0x10, (byte)m_right, 0x00, 0x00, 0x00 });
+        }
+
+        private void button7_Click(object sender, EventArgs e)
+        {
+            int back = -10;
+            TransferBleCommand(new byte[] { 0x10, 0x00, (byte)back/*후방*/, 0x00, 0x00 });
+        }
+
+        private void trim_con_Click(object sender, EventArgs e)
+        {
+            TransferBleCommand(new byte[] { (byte)DataType.Command, (byte)CommandType.Trim, (byte)Trim.PitchDecrease });
+           // TransferBleCommand(new byte[] { (byte)DataType.Command, (byte)CommandType.Trim, (byte)Trim.RollDecrease });
+        }
+
+        private void button19_Click(object sender, EventArgs e)
+        {
+            TransferBleCommand(new byte[] { 0x10, 0x00, 0x00, 0x00, 5 });
+        }
+
+        private void button20_Click(object sender, EventArgs e)
+        {
+            int down = -5;
+            TransferBleCommand(new byte[] { 0x10, 0x00, 0x00, 0x00, (byte)down });
+        }
+
+        private void btnTakeOff_Click(object sender, EventArgs e)
+        {
+            TransferBleCommand(new byte[] { (byte)DataType.Command, (byte)CommandType.FlightEvent, (byte)FlightEvent.TakeOff });
+        }
+        private void btnLanding_Click(object sender, EventArgs e)
+        {
+            mission2_flag = 0;
+            sw_flag = 0;
+            TransferBleCommand(new byte[] { (byte)DataType.Command, (byte)CommandType.FlightEvent, (byte)FlightEvent.Landing });
+        }
+        private void btnEmergencyStop_Click(object sender, EventArgs e)
+        {
+            mission2_flag = 0;
+            TransferBleCommand(new byte[] { (byte)DataType.Command, (byte)CommandType.FlightEvent, (byte)FlightEvent.Stop });
+        }
+
+        private void btn_mission1_Click(object sender, EventArgs e) // Mission 1
+        {
+            TransferBleCommand(new byte[] { (byte)DataType.Command, (byte)CommandType.FlightEvent, (byte)FlightEvent.TakeOff });
+
+            sw1.Reset();
+
+            mySeq = 0;
+            myTick = System.DateTime.Now.Ticks;
+            if (timer2.Enabled == true)
+                timer2.Enabled = false;
+            else
+                timer2.Enabled = true;
+        }
+
+        private void btn_mission2_Click(object sender, EventArgs e) // Mission 2
+        {
+            find_Circle = false;
+            TransferBleCommand(new byte[] { (byte)DataType.Command, (byte)CommandType.FlightEvent, (byte)FlightEvent.TakeOff });
+            mySeq = 0;
+            myTick = System.DateTime.Now.Ticks;
+            if (timer3.Enabled == true)
+                timer3.Enabled = false;
+            else
+                timer3.Enabled = true;
+        }
+
+
+
+        #endregion
+
+
+        #endregion
+
+        #region // ****************** Sensor On 버튼 ****************** //
+        long myTick;
+        int mySeq;
+        private void btnTimer_Click(object sender, EventArgs e) // Sensor On
+        {
+
+            mySeq = 0;
+            myTick = System.DateTime.Now.Ticks;
+            if (timer1.Enabled == true)
+            {
+                timer1.Enabled = false;
+                btnTimer.Text = "Sensor Off";
+            }
+            else
+            {
+                timer1.Enabled = true;
+                btnTimer.Text = "Sensor On";
+            }
+        }
+
+
+        // ****************** Sensor Value ****************** //
+        private void timer1_Tick(object sender, EventArgs e)
+        {
+            mySeq++;
+            TransferBleCommand(new byte[] { 0x11, 0x90, 0x50 }); // imu 
+            TransferBleCommand(new byte[] { 0x11, 0x90, 0x51 }); // 압력, 온도
+            TransferBleCommand(new byte[] { 0x11, 0x90, 0x54 }); // 배터리
+            string answer = matlab.Execute("showfigure(" + filteredX + "," + filteredY + "," + filteredZ + ")");//"X=2:5");
+            Console.WriteLine(answer);
+
+        }
+
+        #endregion
+
+        #region // ****************** Misson1 : 호버링 유지 ****************** // 
+        private void timer2_Tick(object sender, EventArgs e)
+        {
+            /* up = 10, down = -17 , small_up = 4, small_down = -2,  right = 2, left = -2, go = 2, back = -3 */
+
+            TransferBleCommand(new byte[] { 0x11, 0x90, 0x57 }); // 고도 센서값을 반환하도록 --> EventHandler에서 height 변수에 센서값 저장
+
+            if (height > height_num)
+            {
+                if (sw_flag == 0)
+                {
+                    sw1.Start();
+                    sw_flag = 1;
+                }
+            }
+            LogTextBox.Text = "호버링지속시간 : " + sw1.Elapsed.ToString() + "\n\n호버링지속시간 : " + sw1.ElapsedMilliseconds.ToString();
+            heightTextBox1.Text = "지면과의 거리 : " + (height / 10) + "cm";
+
+            if (sw1.Elapsed.Seconds < 5)  // 상승 , 호버링 유지(7초 이전에)
+            {
+                if (height < height_num - 30)
+                {
+                    btn_mission1.Text = "상승";
+                    btn_mission1.ForeColor = Color.BlueViolet;
+
+                    if ((angleRoll > -2) && (angleRoll < 2) && (anglePitch < 2) && (anglePitch> -2) ) // 자세가 안정적일 경우
+                        TransferBleCommand(new byte[] { 0x10, 0x00, 0x00, 0x00, (byte)up }); // only 상승
+
+                    if ((angleRoll <= -2)) // 왼쪽으로 치우치고 있을 경우
+                    {
+                        if ((anglePitch < 2) && (anglePitch > -2))
+                            TransferBleCommand(new byte[] { 0x10, (byte)right/*우횡*/, 0x00, 0x00, (byte)up }); // 오른쪽으로 조금
+                        else if (anglePitch <= -2)
+                            TransferBleCommand(new byte[] { 0x10, (byte)right/*우횡*/, (byte)go/*전방*/, 0x00, (byte)up }); // 오른쪽으로 조금
+                        else if (anglePitch >= 2)
+                            TransferBleCommand(new byte[] { 0x10, (byte)right/*우횡*/, (byte)back/*전방*/, 0x00, (byte)up }); // 오른쪽으로 조금
+                    }
+
+                    if ((angleRoll >= 2)) // 오른쪽으로 치우치고 있을 경우
+                    {
+                        if ((anglePitch < 2) && (anglePitch > -2))
+                            TransferBleCommand(new byte[] { 0x10, (byte)left/*좌횡*/, 0x00, 0x00, (byte)up }); // 왼쪽으로 조금
+                        else if (anglePitch <= -2)
+                            TransferBleCommand(new byte[] { 0x10, (byte)left/*좌횡*/, (byte)go/*전방*/, 0x00, (byte)up }); // 왼쪽으로 조금
+                        else if (anglePitch >= 2)
+                            TransferBleCommand(new byte[] { 0x10, (byte)left/*좌횡*/, (byte)back/*후방*/, 0x00, (byte)up }); // 왼쪽으로 조금
+                    }
+
+
+                    if ((anglePitch <= -2)) // 뒤로 치우칠때
+                    {
+                        if ((angleRoll > -2) && (angleRoll < 2))
+                            TransferBleCommand(new byte[] { 0x10, 0x00, (byte)go/*전방*/, 0x00, (byte)up }); // 앞으로 조금
+                        else if (angleRoll <= -2)
+                            TransferBleCommand(new byte[] { 0x10, (byte)right/*우횡*/, (byte)go/*전방*/, 0x00, (byte)up }); // 앞으로 조금
+                        else if (angleRoll >= 2)
+                            TransferBleCommand(new byte[] { 0x10, (byte)left/*좌횡*/, (byte)go/*전방*/, 0x00, (byte)up }); // 앞으로 조금
+                    }
+
+                    if ((anglePitch >= 2)) // 앞으로 치우칠때
+                    {
+                        if ((angleRoll > -2) && (angleRoll < 2))
+                            TransferBleCommand(new byte[] { 0x10, 0x00, (byte)back/*후방*/, 0x00, (byte)up }); // 뒤로 조금
+                        else if (angleRoll <= -2)
+                            TransferBleCommand(new byte[] { 0x10, (byte)right/*우횡*/, (byte)back/*후방*/, 0x00, (byte)up }); // 뒤로 조금
+                        else if (angleRoll >= 2)
+                            TransferBleCommand(new byte[] { 0x10, (byte)left/*좌횡*/, (byte)back/*후방*/, 0x00, (byte)up }); // 뒤로 조금
+                    }
+
+
+                }
+                else if ((height_num - 30 <= height) && (height < height_num))//small_up
+                {
+
+                    if ((angleRoll > -2) && (angleRoll < 2) && (anglePitch < 2) && (anglePitch > -2)) // 자세가 안정적일 경우
+                        TransferBleCommand(new byte[] { 0x10, 0x00, 0x00, 0x00, (byte)small_up }); // only 상승
+
+                    if ((angleRoll <= -2)) // 왼쪽으로 치우치고 있을 경우
+                    {
+                        if ((anglePitch < 2) && (anglePitch > -2))
+                            TransferBleCommand(new byte[] { 0x10, (byte)right/*우횡*/, 0x00, 0x00, (byte)small_up }); // 오른쪽으로 조금
+                        else if (anglePitch <= -2)
+                            TransferBleCommand(new byte[] { 0x10, (byte)right/*우횡*/, (byte)go/*전방*/, 0x00, (byte)small_up }); // 오른쪽으로 조금
+                        else if (anglePitch >= 2)
+                            TransferBleCommand(new byte[] { 0x10, (byte)right/*우횡*/, (byte)back/*전방*/, 0x00, (byte)small_up }); // 오른쪽으로 조금
+                    }
+
+                    if ((angleRoll >= 2)) // 오른쪽으로 치우치고 있을 경우
+                    {
+                        if ((anglePitch < 2) && (anglePitch > -2))
+                            TransferBleCommand(new byte[] { 0x10, (byte)left/*좌횡*/, 0x00, 0x00, (byte)small_up }); // 왼쪽으로 조금
+                        else if (anglePitch <= -2)
+                            TransferBleCommand(new byte[] { 0x10, (byte)left/*좌횡*/, (byte)go/*전방*/, 0x00, (byte)small_up }); // 왼쪽으로 조금
+                        else if (anglePitch >= 2)
+                            TransferBleCommand(new byte[] { 0x10, (byte)left/*좌횡*/, (byte)back/*후방*/, 0x00, (byte)small_up }); // 왼쪽으로 조금
+                    }
+
+
+                    if ((anglePitch <= -2)) // 뒤로 치우칠때
+                    {
+                        if ((angleRoll > -2) && (angleRoll < 2))
+                            TransferBleCommand(new byte[] { 0x10, 0x00, (byte)go/*전방*/, 0x00, (byte)small_up }); // 앞으로 조금
+                        else if (angleRoll <= -2)
+                            TransferBleCommand(new byte[] { 0x10, (byte)right/*우횡*/, (byte)go/*전방*/, 0x00, (byte)small_up }); // 앞으로 조금
+                        else if (angleRoll >= 2)
+                            TransferBleCommand(new byte[] { 0x10, (byte)left/*좌횡*/, (byte)go/*전방*/, 0x00, (byte)small_up }); // 앞으로 조금
+                    }
+
+                    if ((anglePitch >= 2)) // 앞으로 치우칠때
+                    {
+                        if ((angleRoll > -2) && (angleRoll < 2))
+                            TransferBleCommand(new byte[] { 0x10, 0x00, (byte)back/*후방*/, 0x00, (byte)small_up }); // 뒤로 조금
+                        else if (angleRoll <= -2)
+                            TransferBleCommand(new byte[] { 0x10, (byte)right/*우횡*/, (byte)back/*후방*/, 0x00, (byte)small_up }); // 뒤로 조금
+                        else if (angleRoll >= 2)
+                            TransferBleCommand(new byte[] { 0x10, (byte)left/*좌횡*/, (byte)back/*후방*/, 0x00, (byte)small_up }); // 뒤로 조금
+                    }
+                }
+                else if ((height_num < height) && (height < height_num + 10))
+                {
+                    btn_mission1.Text = "Hovering";
+                    btn_mission1.ForeColor = Color.GreenYellow;
+
+                    if ((angleRoll > -2) && (angleRoll < 2) && (anglePitch < 2) && (anglePitch > -2)) // 자세가 안정적일 경우
+                    {
+                        TransferBleCommand(new byte[] { 0x10, 0x00, (byte)back/*후방*/, 0x00, 0x00 });
+                    }
+
+                    if ((angleRoll <= -2)) // 왼쪽으로 치우치고 있을 경우
+                    {
+                        if ((anglePitch < 2) && (anglePitch >= -2))
+                            TransferBleCommand(new byte[] { 0x10, (byte)right/*우횡*/, 0x00, 0x00, 0x00 }); // 오른쪽으로 조금
+                        else if (anglePitch <= -2)
+                            TransferBleCommand(new byte[] { 0x10, (byte)right/*우횡*/, (byte)go/*전방*/, 0x00, 0x00 }); // 오른쪽으로 조금
+                        else if (anglePitch >= 2)
+                            TransferBleCommand(new byte[] { 0x10, (byte)right/*우횡*/, (byte)back/*전방*/, 0x00, 0x00 }); // 오른쪽으로 조금
+                    }
+
+                    if ((angleRoll >= 2)) // 오른쪽으로 치우치고 있을 경우
+                    {
+                        if ((anglePitch < 2) && (anglePitch >= -2))
+                            TransferBleCommand(new byte[] { 0x10, (byte)left/*좌횡*/, 0x00, 0x00, 0x00 }); // 왼쪽으로 조금
+                        else if (anglePitch <= -2)
+                            TransferBleCommand(new byte[] { 0x10, (byte)left/*좌횡*/, (byte)go/*전방*/, 0x00, 0x00 }); // 왼쪽으로 조금
+                        else if (anglePitch >= 2)
+                            TransferBleCommand(new byte[] { 0x10, (byte)left/*좌횡*/, (byte)back/*후방*/, 0x00, 0x00 }); // 왼쪽으로 조금
+                    }
+
+
+                    if ((anglePitch <= -2)) // 뒤로 치우칠때
+                    {
+                        if ((angleRoll > -2) && (angleRoll < 2))
+                            TransferBleCommand(new byte[] { 0x10, 0x00, (byte)go/*전방*/, 0x00, 0x00 }); // 앞으로 조금
+                        else if (angleRoll <= -2)
+                            TransferBleCommand(new byte[] { 0x10, (byte)right/*우횡*/, (byte)go/*전방*/, 0x00, 0x00 }); // 앞으로 조금
+                        else if (angleRoll >= 2)
+                            TransferBleCommand(new byte[] { 0x10, (byte)left/*좌횡*/, (byte)go/*전방*/, 0x00, 0x00 }); // 앞으로 조금
+                    }
+
+                    if ((anglePitch >= 2)) // 앞으로 치우칠때
+                    {
+                        if ((angleRoll > -2) && (angleRoll < 2))
+                            TransferBleCommand(new byte[] { 0x10, 0x00, (byte)back/*후방*/, 0x00, 0x00 }); // 뒤로 조금
+                        else if (angleRoll <= -2)
+                            TransferBleCommand(new byte[] { 0x10, (byte)right/*우횡*/, (byte)back/*후방*/, 0x00, 0x00 }); // 뒤로 조금
+                        else if (angleRoll >= 2)
+                            TransferBleCommand(new byte[] { 0x10, (byte)left/*좌횡*/, (byte)back/*후방*/, 0x00, 0x00 }); // 뒤로 조금
+                    }
+                }
+
+                else if (height >= height_num + 10)//small_down
+                {
+
+                    if ((angleRoll > -2) && (angleRoll < 2) && (anglePitch < 2) && (anglePitch > -2)) // 자세가 안정적일 경우
+                        TransferBleCommand(new byte[] { 0x10, 0x00, 0x00, 0x00, (byte)small_down }); // only 상승
+
+                    if ((angleRoll <= -2)) // 왼쪽으로 치우치고 있을 경우
+                    {
+                        if ((anglePitch < 2) && (anglePitch > -2))
+                            TransferBleCommand(new byte[] { 0x10, (byte)right/*우횡*/, 0x00, 0x00, (byte)small_down }); // 오른쪽으로 조금
+                        else if (anglePitch <= -2)
+                            TransferBleCommand(new byte[] { 0x10, (byte)right/*우횡*/, (byte)go/*전방*/, 0x00, (byte)small_down }); // 오른쪽으로 조금
+                        else if (anglePitch >= 2)
+                            TransferBleCommand(new byte[] { 0x10, (byte)right/*우횡*/, (byte)back/*전방*/, 0x00, (byte)small_down }); // 오른쪽으로 조금
+                    }
+
+                    if ((angleRoll >= 2)) // 오른쪽으로 치우치고 있을 경우
+                    {
+                        if ((anglePitch < 2) && (anglePitch > -2))
+                            TransferBleCommand(new byte[] { 0x10, (byte)left/*좌횡*/, 0x00, 0x00, (byte)small_down }); // 왼쪽으로 조금
+                        else if (anglePitch <= -2)
+                            TransferBleCommand(new byte[] { 0x10, (byte)left/*좌횡*/, (byte)go/*전방*/, 0x00, (byte)small_down }); // 왼쪽으로 조금
+                        else if (anglePitch >= 2)
+                            TransferBleCommand(new byte[] { 0x10, (byte)left/*좌횡*/, (byte)back/*후방*/, 0x00, (byte)small_down }); // 왼쪽으로 조금
+                    }
+
+
+                    if ((anglePitch <= -2)) // 뒤로 치우칠때
+                    {
+                        if ((angleRoll > -2) && (angleRoll < 2))
+                            TransferBleCommand(new byte[] { 0x10, 0x00, (byte)go/*전방*/, 0x00, (byte)small_down }); // 앞으로 조금
+                        else if (angleRoll <= -2)
+                            TransferBleCommand(new byte[] { 0x10, (byte)right/*우횡*/, (byte)go/*전방*/, 0x00, (byte)small_down }); // 앞으로 조금
+                        else if (angleRoll >= 2)
+                            TransferBleCommand(new byte[] { 0x10, (byte)left/*좌횡*/, (byte)go/*전방*/, 0x00, (byte)small_down }); // 앞으로 조금
+                    }
+
+                    if ((anglePitch >= 2)) // 앞으로 치우칠때
+                    {
+                        if ((angleRoll > -2) && (angleRoll < 2))
+                            TransferBleCommand(new byte[] { 0x10, 0x00, (byte)back/*후방*/, 0x00, (byte)small_down }); // 뒤로 조금
+                        else if (angleRoll <= -2)
+                            TransferBleCommand(new byte[] { 0x10, (byte)right/*우횡*/, (byte)back/*후방*/, 0x00, (byte)small_down }); // 뒤로 조금
+                        else if (angleRoll >= 2)
+                            TransferBleCommand(new byte[] { 0x10, (byte)left/*좌횡*/, (byte)back/*후방*/, 0x00, (byte)small_down }); // 뒤로 조금
+                    }
+                }
+            }
+
+            else // 호버링을 3초 유지 한 이후에 down
+            {
+                btn_mission1.Text = "Landing";
+                btn_mission1.ForeColor = Color.HotPink;
+
+                if ((angleRoll > -2) && (angleRoll < 2) && (anglePitch < 2) && (anglePitch > -2)) // 자세가 안정적일 경우
+                    TransferBleCommand(new byte[] { 0x10, 0x00, 0x00, 0x00, (byte)down }); // only 상승
+
+                if ((angleRoll <= -2)) // 왼쪽으로 치우치고 있을 경우
+                {
+                    if ((anglePitch < 2) && (anglePitch > -2))
+                        TransferBleCommand(new byte[] { 0x10, (byte)right/*우횡*/, 0x00, 0x00, (byte)down }); // 오른쪽으로 조금
+                    else if (anglePitch <= -2)
+                        TransferBleCommand(new byte[] { 0x10, (byte)right/*우횡*/, (byte)go/*전방*/, 0x00, (byte)down }); // 오른쪽으로 조금
+                    else if (anglePitch >= 2)
+                        TransferBleCommand(new byte[] { 0x10, (byte)right/*우횡*/, (byte)back/*전방*/, 0x00, (byte)down }); // 오른쪽으로 조금
+                }
+
+                if ((angleRoll >= 2)) // 오른쪽으로 치우치고 있을 경우
+                {
+                    if ((anglePitch < 2) && (anglePitch > -2))
+                        TransferBleCommand(new byte[] { 0x10, (byte)left/*좌횡*/, 0x00, 0x00, (byte)down }); // 왼쪽으로 조금
+                    else if (anglePitch <= -2)
+                        TransferBleCommand(new byte[] { 0x10, (byte)left/*좌횡*/, (byte)go/*전방*/, 0x00, (byte)down }); // 왼쪽으로 조금
+                    else if (anglePitch >= 2)
+                        TransferBleCommand(new byte[] { 0x10, (byte)left/*좌횡*/, (byte)back/*후방*/, 0x00, (byte)down }); // 왼쪽으로 조금
+                }
+
+
+                if ((anglePitch <= -2)) // 뒤로 치우칠때
+                {
+                    if ((angleRoll >= -2) && (angleRoll <= 2))
+                        TransferBleCommand(new byte[] { 0x10, 0x00, (byte)go/*전방*/, 0x00, (byte)down }); // 앞으로 조금
+                    else if (angleRoll < -2)
+                        TransferBleCommand(new byte[] { 0x10, (byte)right/*우횡*/, (byte)go/*전방*/, 0x00, (byte)down }); // 앞으로 조금
+                    else if (angleRoll > 2)
+                        TransferBleCommand(new byte[] { 0x10, (byte)left/*좌횡*/, (byte)go/*전방*/, 0x00, (byte)down }); // 앞으로 조금
+                }
+
+                if ((anglePitch >= 2)) // 앞으로 치우칠때
+                {
+                    if ((angleRoll > -2) && (angleRoll < 2))
+                        TransferBleCommand(new byte[] { 0x10, 0x00, (byte)back/*후방*/, 0x00, (byte)down }); // 뒤로 조금
+                    else if (angleRoll <= -2)
+                        TransferBleCommand(new byte[] { 0x10, (byte)right/*우횡*/, (byte)back/*후방*/, 0x00, (byte)down }); // 뒤로 조금
+                    else if (angleRoll >= 2)
+                        TransferBleCommand(new byte[] { 0x10, (byte)left/*좌횡*/, (byte)back/*후방*/, 0x00, (byte)down }); // 뒤로 조금
+                }
+
+                if (height < 350 && landing_flag == 0)
+                {
+                    TransferBleCommand(new byte[] { 0x10, 0x00, 0x00, 0x00, (byte)small_up });
+                    landing_flag++;
+                }
+                if (height < 200 && landing_flag == 1)
+                {
+                    TransferBleCommand(new byte[] { 0x10, 0x00, 0x00, 0x00, (byte)small_up });
+                    landing_flag++;
+                }
+                if (height < 150 && landing_flag == 2)
+                {
+                    TransferBleCommand(new byte[] { (byte)DataType.Command, (byte)CommandType.FlightEvent, (byte)FlightEvent.Landing });
+
+                    sw1.Stop();
+                    landing_flag = 0;
+                    height = 0;
+                    timer2.Enabled = false;
+                    sw_flag = 0;
+
+                    btn_mission1.Text = "Mission_1";
+                    btn_mission1.ForeColor = Color.Black;
+                }
+            }
+        }
+        #endregion
+
+
+        void yaw_function(int value)
+        {
+            timer3.Enabled = false;
+            sw1.Start();
+            TransferBleCommand(new byte[] { 0x10, 0x00, 0x00, (byte)value, 0x00 }); // 왼쪽으로 yaw         
+                while (sw1.ElapsedMilliseconds < 80) //요 시간
+                { }
+
+            pink2_flag = 0;
+            direction = 0;
+            timer3.Start();
+            sw1.Stop();
+            sw1.Reset();        
+           
+        }
+
+        void roll_function(int value)
+        {
+            timer3.Enabled = false;
+            sw1.Start();
+            TransferBleCommand(new byte[] { 0x10, 0x00, 0x00, (byte)value, 0x00 }); // 
+            while (sw1.ElapsedMilliseconds < 200) //롤 시간
+            {
+
+            }
+            timer3.Start();
+            sw1.Stop();
+            sw1.Reset();
+
+        }
+
+
+
+        #region // ****************** Misson2 : 주행 ****************** //
+        private void timer3_Tick(object sender, EventArgs e)
+        {
+            TransferBleCommand(new byte[] { 0x11, 0x90, 0x57 });
+            heightTextBox1.Text = "지면과의 거리 : " + (height / 10) + "cm";
+
+            if (mission2_flag == 0)
+            {
+                btn_mission2.Text = "대기";
+                btn_mission2.ForeColor = Color.Black;
+                TransferBleCommand(new byte[] { (byte)DataType.Command, (byte)CommandType.FlightEvent, (byte)FlightEvent.Landing });                
+            }
+
+            else if (mission2_flag == 1)
+            {
+                sw2.Start();
+                if (height < 450) // 높이가 낮은데 
+                {
+                    // 착륙지점이 아니면
+                    if (find_Circle == false)
+                    {
+
+                        btn_mission2.Text = "상승";
+                        btn_mission2.ForeColor = Color.Aqua;
+
+                        
+                            #region >>> 상승
+                            if ((angleRoll >= -1) && (angleRoll <= 1) && (anglePitch >= -1) && (anglePitch <= 0)) // 자세가 안정적일 경우
+                                TransferBleCommand(new byte[] { 0x10, 0x00, 0x00, 0x00, (byte)small_up }); // only 상승
+
+                            if ((angleRoll < -1)) // 왼쪽으로 치우치고 있을 경우
+                            {
+                                if ((anglePitch >= -1) && (anglePitch <= 0))
+                                    TransferBleCommand(new byte[] { 0x10, (byte)right/*우횡*/, 0x00, 0x00, (byte)small_up }); // 오른쪽으로 조금
+                                else if (anglePitch < -1)
+                                    TransferBleCommand(new byte[] { 0x10, (byte)right/*우횡*/, (byte)go/*전방*/, 0x00, (byte)small_up }); // 오른쪽으로 조금
+                                else if (anglePitch > 0)
+                                    TransferBleCommand(new byte[] { 0x10, (byte)right/*우횡*/, (byte)back/*전방*/, 0x00, (byte)small_up }); // 오른쪽으로 조금
+                            }
+
+                            if ((angleRoll > 1)) // 오른쪽으로 치우치고 있을 경우
+                            {
+                                if ((anglePitch >= -1) && (anglePitch <= 0))
+                                    TransferBleCommand(new byte[] { 0x10, (byte)left/*좌횡*/, 0x00, 0x00, (byte)small_up }); // 왼쪽으로 조금
+                                else if (anglePitch < -1)
+                                    TransferBleCommand(new byte[] { 0x10, (byte)left/*좌횡*/, (byte)go/*전방*/, 0x00, (byte)small_up }); // 왼쪽으로 조금
+                                else if (anglePitch > 0)
+                                    TransferBleCommand(new byte[] { 0x10, (byte)left/*좌횡*/, (byte)back/*후방*/, 0x00, (byte)small_up }); // 왼쪽으로 조금
+                            }
+
+
+                            if ((anglePitch < -1)) // 뒤로 치우칠때
+                            {
+                                if ((angleRoll >= -1) && (angleRoll <= 1))
+                                    TransferBleCommand(new byte[] { 0x10, 0x00, (byte)go/*전방*/, 0x00, (byte)small_up }); // 앞으로 조금
+                                else if (angleRoll < -1)
+                                    TransferBleCommand(new byte[] { 0x10, (byte)right/*우횡*/, (byte)go/*전방*/, 0x00, (byte)small_up }); // 앞으로 조금
+                                else if (angleRoll > 1)
+                                    TransferBleCommand(new byte[] { 0x10, (byte)left/*좌횡*/, (byte)go/*전방*/, 0x00, (byte)small_up }); // 앞으로 조금
+                            }
+
+                            if ((anglePitch > 0)) // 앞으로 치우칠때
+                            {
+                                if ((angleRoll >= -1) && (angleRoll <= 1))
+                                    TransferBleCommand(new byte[] { 0x10, 0x00, (byte)back/*후방*/, 0x00, (byte)small_up }); // 뒤로 조금
+                                else if (angleRoll < -1)
+                                    TransferBleCommand(new byte[] { 0x10, (byte)right/*우횡*/, (byte)back/*후방*/, 0x00, (byte)small_up }); // 뒤로 조금
+                                else if (angleRoll > 1)
+                                    TransferBleCommand(new byte[] { 0x10, (byte)left/*좌횡*/, (byte)back/*후방*/, 0x00, (byte)small_up }); // 뒤로 조금
+                            }
+                            #endregion <<< 상승
+
+                        
+                        //else
+                        //{
+                        //    if (direction == -1) // 왼쪽으로 꺾어야 할 때
+                        //    {
+                        //        yaw_function(yaw_left); // 90도 yaw
+                        //    }
+                        //    else if (direction == 1) // 오른쪽으로 꺾어야 할 때
+                        //    {
+                        //        yaw_function(yaw_right); // 90도 yaw
+                        //    }
+                        //}
+                    }
+                    // 착륙지점일때
+                    else
+                    {
+                        btn_mission2.Text = "Landing";
+                        btn_mission2.ForeColor = Color.LightGreen;
+
+                        #region >>> 착륙지점일때 landing
+                        if ((angleRoll > -2) && (angleRoll < 2) && (anglePitch > -2) && (anglePitch < 2)) // 자세가 안정적일 경우
+                            TransferBleCommand(new byte[] { 0x10, 0x00, 0x00, 0x00, (byte)down }); // only 하강
+
+                        if ((angleRoll <= -2)) // 왼쪽으로 치우치고 있을 경우
+                        {
+                            if ((anglePitch > -2) && (anglePitch < 2))
+                                TransferBleCommand(new byte[] { 0x10, (byte)right/*우횡*/, 0x00, 0x00, (byte)down }); // 오른쪽으로 조금
+                            else if (anglePitch <= -2)
+                                TransferBleCommand(new byte[] { 0x10, (byte)right/*우횡*/, (byte)go/*전방*/, 0x00, (byte)down }); // 오른쪽으로 조금
+                            else if (anglePitch >= 2)
+                                TransferBleCommand(new byte[] { 0x10, (byte)right/*우횡*/, (byte)back/*전방*/, 0x00, (byte)down }); // 오른쪽으로 조금
+                        }
+
+                        if ((angleRoll >= 2)) // 오른쪽으로 치우치고 있을 경우
+                        {
+                            if ((anglePitch > -2) && (anglePitch < 2))
+                                TransferBleCommand(new byte[] { 0x10, (byte)left/*좌횡*/, 0x00, 0x00, (byte)down }); // 왼쪽으로 조금
+                            else if (anglePitch <= -2)
+                                TransferBleCommand(new byte[] { 0x10, (byte)left/*좌횡*/, (byte)go/*전방*/, 0x00, (byte)down }); // 왼쪽으로 조금
+                            else if (anglePitch >= 2)
+                                TransferBleCommand(new byte[] { 0x10, (byte)left/*좌횡*/, (byte)back/*후방*/, 0x00, (byte)down }); // 왼쪽으로 조금
+                        }
+
+
+                        if ((anglePitch <= -2)) // 뒤로 치우칠때
+                        {
+                            if ((angleRoll >= -2) && (angleRoll <= 2))
+                                TransferBleCommand(new byte[] { 0x10, 0x00, (byte)go/*전방*/, 0x00, (byte)down }); // 앞으로 조금
+                            else if (angleRoll < -2)
+                                TransferBleCommand(new byte[] { 0x10, (byte)right/*우횡*/, (byte)go/*전방*/, 0x00, (byte)down }); // 앞으로 조금
+                            else if (angleRoll > 2)
+                                TransferBleCommand(new byte[] { 0x10, (byte)left/*좌횡*/, (byte)go/*전방*/, 0x00, (byte)down }); // 앞으로 조금
+                        }
+
+                        if ((anglePitch >= 2)) // 앞으로 치우칠때
+                        {
+                            if ((angleRoll > -2) && (angleRoll < 2))
+                                TransferBleCommand(new byte[] { 0x10, 0x00, (byte)back/*후방*/, 0x00, (byte)down }); // 뒤로 조금
+                            else if (angleRoll <= -2)
+                                TransferBleCommand(new byte[] { 0x10, (byte)right/*우횡*/, (byte)back/*후방*/, 0x00, (byte)down }); // 뒤로 조금
+                            else if (angleRoll >= 2)
+                                TransferBleCommand(new byte[] { 0x10, (byte)left/*좌횡*/, (byte)back/*후방*/, 0x00, (byte)down }); // 뒤로 조금
+                        }
+
+                        if (height < 350 && landing_flag == 0)
+                        {
+                            TransferBleCommand(new byte[] { 0x10, 0x00, 0x00, 0x00, (byte)small_up });
+                            landing_flag++;
+                        }
+                        if (height < 200 && landing_flag == 1)
+                        {
+                            TransferBleCommand(new byte[] { 0x10, 0x00, 0x00, 0x00, (byte)small_up });
+                            landing_flag++;
+                        }
+                        if (height < 150 && landing_flag == 2)
+                        {
+                            TransferBleCommand(new byte[] { (byte)DataType.Command, (byte)CommandType.FlightEvent, (byte)FlightEvent.Landing });
+
+                            landing_flag = 0;
+                            height = 0;
+                            timer3.Enabled = false;
+
+                            btn_mission2.Text = "Mission_2";
+                            btn_mission2.ForeColor = Color.Black;
+                            mission2_flag = 0;
+                            find_Circle = false;
+                            pink2_flag = 0;
+                        }
+                        #endregion <<< 착륙지점 일때 landing
+                        sw2.Stop();
+                        sw2.Reset();
+                    }
+                }
+
+                else if (height > 500) // 높이가 높으면 
+                    TransferBleCommand(new byte[] { 0x10, 0x00, 0x00, 0x00, (byte)small_down });
+
+                else //  >> 고도 유지  60cm ~ 65cm ==>>  라인인식 - 주행 알고리즘 
+                {
+                    btn_mission2.Text = "자율주행";
+                    btn_mission2.ForeColor = Color.HotPink;
+
+                    // 직선 두개 인식 : 드론이 라인 안에서 직선코스를 인식할 경우
+                    if (two_line == true)
+                    {
+                        if (((angle_pink >= 73) && (angle_pink <= 90)) || ((angle_pink_right >= 73) && (angle_pink_right <= 90)))
+                        {
+                            #region >>> 완전한 직선코스 
+                            if (true) // 90도 정도의 꺾이는 구간을 인식하는 횟수가 5번보다 적을때 
+                            {
+                                if (find_Circle == true) // 도착지점 인식
+                                {
+                                    btn_mission2.Text = "Landing";
+                                    btn_mission2.ForeColor = Color.LightGreen;
+
+                                    #region >> 하강 & 랜딩
+                                    if ((angleRoll > -2) && (angleRoll < 2) && (anglePitch > -2) && (anglePitch < 2)) // 자세가 안정적일 경우
+                                        TransferBleCommand(new byte[] { 0x10, 0x00, 0x00, 0x00, (byte)down }); // only 하강
+
+                                    if ((angleRoll <= -2)) // 왼쪽으로 치우치고 있을 경우
+                                    {
+                                        if ((anglePitch > -2) && (anglePitch < 2))
+                                            TransferBleCommand(new byte[] { 0x10, (byte)right/*우횡*/, 0x00, 0x00, (byte)down }); // 오른쪽으로 조금
+                                        else if (anglePitch <= -2)
+                                            TransferBleCommand(new byte[] { 0x10, (byte)right/*우횡*/, (byte)go/*전방*/, 0x00, (byte)down }); // 오른쪽으로 조금
+                                        else if (anglePitch >= 2)
+                                            TransferBleCommand(new byte[] { 0x10, (byte)right/*우횡*/, (byte)back/*전방*/, 0x00, (byte)down }); // 오른쪽으로 조금
+                                    }
+
+                                    if ((angleRoll >= 2)) // 오른쪽으로 치우치고 있을 경우
+                                    {
+                                        if ((anglePitch > -2) && (anglePitch < 2))
+                                            TransferBleCommand(new byte[] { 0x10, (byte)left/*좌횡*/, 0x00, 0x00, (byte)down }); // 왼쪽으로 조금
+                                        else if (anglePitch <= -2)
+                                            TransferBleCommand(new byte[] { 0x10, (byte)left/*좌횡*/, (byte)go/*전방*/, 0x00, (byte)down }); // 왼쪽으로 조금
+                                        else if (anglePitch >= 2)
+                                            TransferBleCommand(new byte[] { 0x10, (byte)left/*좌횡*/, (byte)back/*후방*/, 0x00, (byte)down }); // 왼쪽으로 조금
+                                    }
+
+
+                                    if ((anglePitch <= -2)) // 뒤로 치우칠때
+                                    {
+                                        if ((angleRoll >= -2) && (angleRoll <= 2))
+                                            TransferBleCommand(new byte[] { 0x10, 0x00, (byte)go/*전방*/, 0x00, (byte)down }); // 앞으로 조금
+                                        else if (angleRoll < -2)
+                                            TransferBleCommand(new byte[] { 0x10, (byte)right/*우횡*/, (byte)go/*전방*/, 0x00, (byte)down }); // 앞으로 조금
+                                        else if (angleRoll > 2)
+                                            TransferBleCommand(new byte[] { 0x10, (byte)left/*좌횡*/, (byte)go/*전방*/, 0x00, (byte)down }); // 앞으로 조금
+                                    }
+
+                                    if ((anglePitch >= 2)) // 앞으로 치우칠때
+                                    {
+                                        if ((angleRoll > -2) && (angleRoll < 2))
+                                            TransferBleCommand(new byte[] { 0x10, 0x00, (byte)back/*후방*/, 0x00, (byte)down }); // 뒤로 조금
+                                        else if (angleRoll <= -2)
+                                            TransferBleCommand(new byte[] { 0x10, (byte)right/*우횡*/, (byte)back/*후방*/, 0x00, (byte)down }); // 뒤로 조금
+                                        else if (angleRoll >= 2)
+                                            TransferBleCommand(new byte[] { 0x10, (byte)left/*좌횡*/, (byte)back/*후방*/, 0x00, (byte)down }); // 뒤로 조금
+                                    }
+                                    #endregion <<< >> 하강 & 랜딩
+                                }
+                          else // 도착지점이 아닌 직선코스에 위치해 있을때
+                                {
+                                    if ((angleRoll > -2) && (angleRoll < 2))
+                                        TransferBleCommand(new byte[] { 0x10, 0x00, (byte)mission_go, 0x00, 0x00 }); // 앞으로 이동
+                                    else if (angleRoll <= -2)
+                                        TransferBleCommand(new byte[] { 0x10, (byte)right/*우횡*/, (byte)mission_go, 0x00, 0x00 }); // 앞으로 이동
+                                    else if (angleRoll >= 2)
+                                        TransferBleCommand(new byte[] { 0x10, (byte)left/*좌횡*/, (byte)mission_go, 0x00, 0x00 }); // 앞으로 이동
+                                }
+                            }
+                            #endregion <<<< 완전한 직선코스
+
+                            
+                        }
+
+                        if ((angle_pink < 73) || (angle_pink_right < 73) )
+                        {
+
+                            if(next==0)
+                                yaw_function(yaw_left);
+                            else if (next == 2)
+                                yaw_function(yaw_right);
+                        }
+                    }
+                    // 직선 두개를 인식 못할때 : 드론이 라인 위의 불안정한 위치에 있을때
+                    else if (two_line == false)
+                    {
+                        if (((angle_pink >= 75) && (angle_pink <= 90)) || ((angle_pink_right >= 75) && (angle_pink_right <= 90)))
+                        {
+                            #region >>> 완전한 직선코스 
+                            
+                                if (find_Circle == true) // 도착지점 인식
+                                {
+                                    btn_mission2.Text = "Landing";
+                                    btn_mission2.ForeColor = Color.LightGreen;
+
+                                    if ((angleRoll > -2) && (angleRoll < 2) && (anglePitch > -2) && (anglePitch < 2)) // 자세가 안정적일 경우
+                                        TransferBleCommand(new byte[] { 0x10, 0x00, 0x00, 0x00, (byte)down }); // only 하강
+
+                                    if ((angleRoll <= -2)) // 왼쪽으로 치우치고 있을 경우
+                                    {
+                                        if ((anglePitch > -2) && (anglePitch < 2))
+                                            TransferBleCommand(new byte[] { 0x10, (byte)right/*우횡*/, 0x00, 0x00, (byte)down }); // 오른쪽으로 조금
+                                        else if (anglePitch <= -2)
+                                            TransferBleCommand(new byte[] { 0x10, (byte)right/*우횡*/, (byte)go/*전방*/, 0x00, (byte)down }); // 오른쪽으로 조금
+                                        else if (anglePitch >= 2)
+                                            TransferBleCommand(new byte[] { 0x10, (byte)right/*우횡*/, (byte)back/*전방*/, 0x00, (byte)down }); // 오른쪽으로 조금
+                                    }
+
+                                    if ((angleRoll >= 2)) // 오른쪽으로 치우치고 있을 경우
+                                    {
+                                        if ((anglePitch > -2) && (anglePitch < 2))
+                                            TransferBleCommand(new byte[] { 0x10, (byte)left/*좌횡*/, 0x00, 0x00, (byte)down }); // 왼쪽으로 조금
+                                        else if (anglePitch <= -2)
+                                            TransferBleCommand(new byte[] { 0x10, (byte)left/*좌횡*/, (byte)go/*전방*/, 0x00, (byte)down }); // 왼쪽으로 조금
+                                        else if (anglePitch >= 2)
+                                            TransferBleCommand(new byte[] { 0x10, (byte)left/*좌횡*/, (byte)back/*후방*/, 0x00, (byte)down }); // 왼쪽으로 조금
+                                    }
+
+
+                                    if ((anglePitch <= -2)) // 뒤로 치우칠때
+                                    {
+                                        if ((angleRoll >= -2) && (angleRoll <= 2))
+                                            TransferBleCommand(new byte[] { 0x10, 0x00, (byte)go/*전방*/, 0x00, (byte)down }); // 앞으로 조금
+                                        else if (angleRoll < -2)
+                                            TransferBleCommand(new byte[] { 0x10, (byte)right/*우횡*/, (byte)go/*전방*/, 0x00, (byte)down }); // 앞으로 조금
+                                        else if (angleRoll > 2)
+                                            TransferBleCommand(new byte[] { 0x10, (byte)left/*좌횡*/, (byte)go/*전방*/, 0x00, (byte)down }); // 앞으로 조금
+                                    }
+
+                                    if ((anglePitch >= 2)) // 앞으로 치우칠때
+                                    {
+                                        if ((angleRoll > -2) && (angleRoll < 2))
+                                            TransferBleCommand(new byte[] { 0x10, 0x00, (byte)back/*후방*/, 0x00, (byte)down }); // 뒤로 조금
+                                        else if (angleRoll <= -2)
+                                            TransferBleCommand(new byte[] { 0x10, (byte)right/*우횡*/, (byte)back/*후방*/, 0x00, (byte)down }); // 뒤로 조금
+                                        else if (angleRoll >= 2)
+                                            TransferBleCommand(new byte[] { 0x10, (byte)left/*좌횡*/, (byte)back/*후방*/, 0x00, (byte)down }); // 뒤로 조금
+                                    }
+                                }
+
+                                else // 도착지점이 아닌 직선코스에 위치해 있지만 라인 밖 또는 어중간한 위치 
+                                {
+                                    if(pitch_how == 0)
+                                    {
+                                        TransferBleCommand(new byte[] { 0x10, 0x00, (byte)mission_go, 0x00, 0x00 }); // 앞으로 이동
+
+                                        //if ((angleRoll > -2) && (angleRoll < 2))
+                                        //    TransferBleCommand(new byte[] { 0x10, 0x00, (byte)mission_go, 0x00, 0x00 }); // 앞으로 이동
+                                        //else if (angleRoll <= -2)
+                                        //    TransferBleCommand(new byte[] { 0x10, (byte)right/*우횡*/, (byte)mission_go, 0x00, 0x00 }); // 앞으로 이동
+                                        //else if (angleRoll >= 2)
+                                        //    TransferBleCommand(new byte[] { 0x10, (byte)left/*좌횡*/, (byte)mission_go, 0x00, 0x00 }); // 앞으로 이동
+                                    }
+                                    else if(pitch_how == 1)
+                                    {
+                                        roll_function(mission_left);
+                                    }
+                                    else if(pitch_how == 2)
+                                    {
+                                        roll_function(mission_right);
+                                    }                              
+                                }
+
+                            
+                            #endregion <<<< 완전한 직선코스
+
+        
+
+                        }
+
+                        else if((angle_pink < 68) || (angle_pink_right < 68))
+                        {
+                           
+                            if (next == 0)
+                                yaw_function(yaw_left);
+                            else if (next == 2)
+                                yaw_function(yaw_right);
+                        }
+                    }
+                } //  <<< 고도 유지  60cm ~ 65cm ==>>  라인인식 - 주행 알고리즘 
+
+
+            } // mission_flag == 1
+        }     
+
+
+        #endregion
+
+        #endregion  #################################################### 드론  #####################
+
+
+
+
+        #region ############################################# 영상처리 ##########################3
+
+        public VideoCapture Source;
+
+        #region 색 HSV 잡기 / 변수선언
+
+
+        int next = 1;
+
+        ////주행 도로의 색 
+        //Hsv hsv_pink_min = new Hsv(50, 40, 100);
+        //Hsv hsv_pink_max = new Hsv(90, 100, 200);
+        Hsv hsv_pink_min = new Hsv(30, 100, 88);
+        Hsv hsv_pink_max = new Hsv(90, 211, 255);
+
+        //원판의 색
+        Hsv hsv_circle_min = new Hsv(50, 40, 100);
+        Hsv hsv_circle_max = new Hsv(90, 100, 200);
+
+        int mBlurParam = 10;
+        int mCannyParam = 20; //블러한 영상에서 윤곽선(엣지)잡을때 씀
+        double cannyThreshold = 180.0; //최댓값
+        double cannyThresholdLinking = 120.0;//최솟값
+        bool find_Circle = false;
+        double circleAccumulatorThreshold = 200;
+        int x, y;
+        #endregion 색 HSV 잡기 / 변수선언
+
+        private void ImageProcessing(object sender, EventArgs e)
+        {
+            #region 변수 및 선언및 초기화
+
+
+            //Hue값은 0~359이나 8bit 저장을 위해 반으로 나누어(0~179) 사용한다 
+            //Saturation과 Value 값은 0~100이나 8bit 저장을 위해 2.55를 곱해(0~255) 사용한다
+            // 녹색 분리를 위한 min max
+
+
+
+            //영상 불러오기
+            var mat = Source.QueryFrame(); //var 은 영상을 담는 자료형// 다음 프레임의 영상을 받아서 mat에 넣음
+            if (mat == null)
+                return;
+
+            //var OriginalImage = mat.ToImage<Bgr, Byte>();
+            var BgrOImage = mat.ToImage<Bgr, Byte>();  //mat이라는 영상을 rgb로 변환함
+
+            //BgrOImage2.ROI = Rectangle.Empty;      
+            //Rectangle roi = new Rectangle(0, 160, 480, 160); // set the roi
+            //BgrOImage2.ROI = roi;
+
+            //var BgrOImage = BgrOImage2.Copy();
+
+            //RGB(BGR) -> HSV 
+            var HsvOImage = mat.ToImage<Hsv, Byte>(); //mat이라는 영상을 hsv로 변환
+
+            //HsvOImage.ROI = Rectangle.Empty;
+            //Rectangle roi2 = new Rectangle(0, 160, 480, 160); // set the roi
+            //HsvOImage.ROI = roi2;
+
+
+            //Gaussian Bluring
+            var BlurImage = HsvOImage.SmoothBlur(mBlurParam, mBlurParam);//hsv 이미지를 블러처리함.
+                                                                         //파라미터는 몇x몇 사이즈로로 blur 할지
+                                                                         //imageBox3.Image = BlurImage;
+                                                                         // 원본과 흑백 영상
+            var black = mat.ToImage<Gray, Byte>();
+            var color = mat.ToImage<Bgr, Byte>();
+            var circle = mat.ToImage<Gray, Byte>();
+
+            #endregion  변수 및 선언및 초기화
+
+            #region 색분리해서 저장 / 처리 시작
+            ///여기서부턴 라인인식을 위한 처리단계
+
+            Image<Gray, Byte> pinkDest = HsvOImage.InRange(hsv_pink_min, hsv_pink_max);
+
+
+
+            #endregion 색분리해서 저장 / 처리 시작
+
+            #region 블러, 캐니, 침식,
+
+
+            UMat pyrDown = new UMat();
+
+            pinkDest._Dilate(3);
+            pinkDest._Erode(3);
+            CvInvoke.PyrDown(pinkDest, pyrDown);
+            CvInvoke.PyrUp(pyrDown, pinkDest);
+            Image<Gray, Byte> pinkDest_con = pinkDest.SmoothBlur(mBlurParam, mBlurParam).Canny(mCannyParam, mCannyParam);
+
+
+
+
+            UMat cannyEdges_pink = new UMat();
+
+
+            Image<Bgr, Byte> lineImage_pink_Line = color.CopyBlank();
+            Image<Bgr, Byte> lineImage_pink = color.CopyBlank();
+
+            Image<Bgr, Byte> lineImage_pink2_Line = color.CopyBlank();
+            Image<Bgr, Byte> lineImage_pink2 = color.CopyBlank();
+
+            Image<Bgr, Byte> lineImage_pink_right_Line = color.CopyBlank();
+            Image<Bgr, Byte> lineImage_pink_right = color.CopyBlank();
+
+
+
+            CvInvoke.Canny(pinkDest_con, cannyEdges_pink, cannyThreshold, cannyThresholdLinking);
+            LineSegment2D[] lines_pink = CvInvoke.HoughLinesP(cannyEdges_pink, 1, Math.PI / 45.0, 50, 50, 100);
+
+            #endregion 블러, 캐니, 침식,
+
+            #region 선추출
+
+            //길이 비교에 따른 선 추출
+
+            LineSegment2D Long_pink = new LineSegment2D();
+            LineSegment2D Long_pink_right = new LineSegment2D();
+            LineSegment2D Long_pink2 = new LineSegment2D();
+            foreach (LineSegment2D line in lines_pink)
+            {
+                LineSegment2D Long_line = line;
+                //  LineSegment2D Long2_line = line;
+                //  LineSegment2D s_line = line; //수평라인
+
+                double dx_long = Long_line.P2.X - Long_line.P1.X;  //분홍
+                double dy_long = Long_line.P2.Y - Long_line.P1.Y;
+                double slope_long = Math.Atan2(dy_long, dx_long);
+                int angle_long = (int)(Math.Abs(slope_long * 180) / Math.PI);
+
+
+                //if ((int)Math.Abs(180 * Math.Atan2((line.P2.Y - line.P1.Y), (line.P2.X - line.P1.X))) >30) //각도
+                if (angle_long > 30)
+                {
+                    // if (Long_line.P1.Y> 150 &&  Long_line.P2.Y > 150)
+                    {
+                        if (Long_line.Length > Long_pink.Length)
+                            Long_pink = Long_line;
+
+                        int width = Long_line.P1.X;
+                        if (((width) < Long_pink.P1.X - 100) || ((width) > Long_pink.P1.X + 100))
+                        {
+                            if (Long_line.Length > Long_pink_right.Length)
+                                Long_pink_right = Long_line;
+                        }
+                    }
+                }
+
+                else
+                {
+                    if (Long_line.Length > Long_pink2.Length)
+                        Long_pink2 = Long_line;
+                }
+
+
+            }
+            /*
+            foreach (LineSegment2D line in lines_pink)
+            {
+                LineSegment2D Long_line = line;
+                if ((int)Math.Abs(180 * Math.Atan2((line.P2.Y - line.P1.Y), (line.P2.X - line.P1.X))) > 30)
+                {
+                    if (((Long_line.P1.X + 60) > Long_pink.P1.X) || ((Long_line.P1.X - 60) < Long_pink.P1.X))
+                    {
+                        if (Long_line.Length > Long_pink_right.Length)
+                            Long_pink_right = Long_line;
+                    }
+                }
+            }*/
+            lineImage_pink_Line.Draw(Long_pink, new Bgr(Color.HotPink), 6);
+            lineImage_pink2_Line.Draw(Long_pink2, new Bgr(Color.AliceBlue), 6);
+            lineImage_pink_right_Line.Draw(Long_pink_right, new Bgr(Color.HotPink), 6);
+
+            #endregion  선추출
+
+            #region 각도계산
+
+            double dx_pink = Long_pink.P2.X - Long_pink.P1.X;  //분홍
+            double dy_pink = Long_pink.P2.Y - Long_pink.P1.Y;
+            double slope_pink = Math.Atan2(dy_pink, dx_pink);
+            angle_pink = (int)(Math.Abs(slope_pink * 180) / Math.PI);
+
+            double dx_pink2 = Long_pink2.P2.X - Long_pink2.P1.X;  //분홍
+            double dy_pink2 = Long_pink2.P2.Y - Long_pink2.P1.Y;
+            double slope_pink2 = Math.Atan2(dy_pink2, dx_pink2);
+            angle_pink2 = (int)(Math.Abs(slope_pink2 * 180) / Math.PI);
+
+            double dx_pink_right = Long_pink_right.P2.X - Long_pink_right.P1.X;  //분홍
+            double dy_pink_right = Long_pink_right.P2.Y - Long_pink_right.P1.Y;
+            double slope_pink_right = Math.Atan2(dy_pink_right, dx_pink_right);
+            angle_pink_right = (int)(Math.Abs(slope_pink_right * 180) / Math.PI);
+
+
+            #endregion 각도계산
+
+            #region 텍스트넣기
+
+
+
+            #region 분홍형광색
+            if (Long_pink_right.Length < 30)
+                CvInvoke.PutText(lineImage_pink, "P " + Convert.ToString(angle_pink), new System.Drawing.Point((int)(dx_pink / 2 + Long_pink.P1.X), (int)(dy_pink / 2 + Long_pink.P1.Y)), FontFace.HersheyPlain, 2.0, new Bgr(Color.HotPink).MCvScalar, 4);
+            else// 수직선 두줄잡히면 가운데에 각도 뜨게
+            {
+                
+                if (Long_pink.P1.X < Long_pink_right.P1.X)
+                {
+                    CvInvoke.PutText(lineImage_pink, "P " + Convert.ToString(angle_pink), new System.Drawing.Point((int)(dx_pink / 2 + Long_pink.P1.X), (int)(dy_pink / 2 + Long_pink.P1.Y)), FontFace.HersheyPlain, 2.0, new Bgr(Color.HotPink).MCvScalar, 4);
+                    CvInvoke.PutText(lineImage_pink_right, "PR ", new System.Drawing.Point((int)(dx_pink_right / 2 + Long_pink_right.P1.X), (int)(dy_pink_right / 2 + Long_pink_right.P1.Y)), FontFace.HersheyPlain, 2.0, new Bgr(Color.HotPink).MCvScalar, 4);
+                }
+                else
+                {
+                    CvInvoke.PutText(lineImage_pink, "P ", new System.Drawing.Point((int)(dx_pink / 2 + Long_pink.P1.X), (int)(dy_pink / 2 + Long_pink.P1.Y)), FontFace.HersheyPlain, 2.0, new Bgr(Color.HotPink).MCvScalar, 4);
+                    CvInvoke.PutText(lineImage_pink_right, "PR " + Convert.ToString(angle_pink), new System.Drawing.Point((int)(dx_pink_right / 2 + Long_pink_right.P1.X), (int)(dy_pink_right / 2 + Long_pink_right.P1.Y)), FontFace.HersheyPlain, 2.0, new Bgr(Color.HotPink).MCvScalar, 4);
+                }
+            }
+            lineImage_pink.Draw(Long_pink, new Bgr(Color.HotPink), 4);
+            lineImage_pink_right.Draw(Long_pink_right, new Bgr(Color.HotPink), 4);
+
+
+
+            button12.Text = "x : " + Long_pink.P1.X;
+            // *************** 라인 두개 인식 ****************//
+            if (Long_pink.Length < 30 || Long_pink_right.Length < 30)
+                two_line = false;
+            else
+                two_line = true;
+            // *************** 라인 두개 인식 ****************//
+
+            if(two_line == false) // 라인 1개만 인식할때 
+            {
+                X_flag = Long_pink.P1.X;
+                if (X_flag < 210)
+                    pitch_how = 1; // 좌횡전진 해야함
+                else if (X_flag > 270)
+                    pitch_how = 2; // 우횡전진 해야함
+                else 
+                    pitch_how = 0;
+            }
+            button8.Text = "pitch_how : " + pitch_how;
+            if ((Long_pink2.Length < 30)) //p2 라인 안잡힐때
+            {
+                
+                if ((Long_pink.Length < 30)) //둘다 안잡힐때
+                    next = 5;
+                else if (angle_pink < 75)
+                {
+                    if (Long_pink.P1.Y > Long_pink.P2.Y)
+                        next = 2;
+                    else
+                        next = -1;
+                }
+                else
+                    next = 1;
+            }
+
+            else //pink2 라인 잡힐때
+            {
+                
+                if (Long_pink.Length < 30) //p1 안잡힐때
+                {           
+                    
+                    if ((240-Long_pink2.P1.X) > Long_pink2.P2.Y-240)
+                    {
+                        next = 2;
+                        right_flag++;
+                    }
+                        
+                    else
+                    {
+                        next = 0;
+                        left_flag++;
+                    }
+                       
+                }
+                else// 둘다 잡힐때
+                {
+
+                    if (Long_pink.P1.Y> Long_pink.P2.Y) //왼쪽
+                    {
+                        if ((((Long_pink2.P1.Y + Long_pink2.P2.Y) / 2 - Long_pink.P1.Y) + Long_pink.P1.X) > Long_pink2.P2.X - 30)
+                            next = 0;
+                       else if ((((Long_pink2.P1.Y + Long_pink2.P2.Y) / 2 - Long_pink.P1.Y) + Long_pink.P1.X) < Long_pink2.P1.X + 30)
+                            next = 2;
+                    }
+                    else
+                    {
+                        if ((((Long_pink2.P1.Y + Long_pink2.P2.Y) / 2 - Long_pink.P2.Y) + Long_pink.P2.X) > Long_pink.P2.X - 30)
+                            next = 0;
+                       else if ((((Long_pink2.P1.Y + Long_pink2.P2.Y) / 2 - Long_pink.P2.Y) + Long_pink.P2.X) < Long_pink.P1.X + 30)
+                            next = 2;
+
+                    }
+                    /////////////////////////
+                 
+
+                   ///////////////////////////
+
+                        //분홍선(다음 수평선) p2
+                        if (Long_pink2.P1.Y + 30 > Long_pink.P1.Y)
+                    {
+                        next = 1;
+                        lineImage_pink2.Draw(Long_pink2, new Bgr(Color.AliceBlue), 4);
+
+                        if (((Long_pink.P1.Y + Long_pink.P2.Y) / 2) > Long_pink2.P1.Y)
+                        {
+                            pink2_flag++;
+                            button8.Text = "pink2_flag :" + pink2_flag;
+                        }
+                    }
+
+                    else
+                    {
+                        if ((Long_pink.P1.X - Long_pink2.P1.X) > (Long_pink2.P2.X - Long_pink.P2.X))
+                        {
+                            CvInvoke.PutText(lineImage_pink2, "< " + Convert.ToString(angle_pink2), new System.Drawing.Point((int)(dx_pink2 / 2 + Long_pink2.P1.X), (int)(dy_pink2 / 2 + Long_pink2.P1.Y)), FontFace.HersheyPlain, 3.0, new Bgr(Color.AliceBlue).MCvScalar, 4);
+                            lineImage_pink2.Draw(Long_pink2, new Bgr(Color.AliceBlue), 4);
+                            next = -1;
+                            left_flag++;
+
+                            if (((Long_pink.P1.Y + Long_pink.P2.Y) / 2) > Long_pink2.P1.Y)
+                            {
+                                pink2_flag++;
+
+                            }
+                        }
+                        else
+                        {
+                            CvInvoke.PutText(lineImage_pink2, "> " + Convert.ToString(angle_pink2), new System.Drawing.Point((int)(dx_pink2 / 2 + Long_pink2.P1.X), (int)(dy_pink2 / 2 + Long_pink2.P1.Y)), FontFace.HersheyPlain, 3.0, new Bgr(Color.AliceBlue).MCvScalar, 4);
+                            lineImage_pink2.Draw(Long_pink2, new Bgr(Color.AliceBlue), 4);
+                            next = 2;
+                            right_flag++;
+                            if (((Long_pink.P1.Y + Long_pink.P2.Y) / 2) > Long_pink2.P1.Y)
+                            {
+                                pink2_flag++;
+                            }
+                        }
+                    }
+                }
+                
+
+            }
+            
+            #endregion 분홍형광색
+
+            #endregion  텍스트넣기
+
+            #region 방향 표시 버튼
+
+            nextangle = angle_pink2 - angle_pink;
+            if (Long_pink.Length < 30) // p1 라인 안잡힐때 
+                nextangle = angle_pink2;
+
+            else if ((Long_pink2.Length < 30)) //p2 라인 안잡힐때
+                nextangle = angle_pink;
+
+            if (next == -1)//왼쪽
+            {
+                button1.BackColor = Color.FromArgb(16, 207, 51);
+                if (nextangle < 70)
+                    button2.BackColor = Color.FromArgb(16, 207, 51);
+                else
+                    button2.BackColor = SystemColors.Control;
+
+                button3.BackColor = SystemColors.Control;
+                if (nextangle < 0)
+                    label2.Text = "좌 : " + (-nextangle).ToString() + "º";
+                else
+                    label2.Text = "좌 : " + (90 - nextangle).ToString() + "º";
+            }
+
+
+            else if (next == 1)//직진
+            {
+                button2.BackColor = Color.FromArgb(16, 207, 51);
+                button1.BackColor = SystemColors.Control;
+                button3.BackColor = SystemColors.Control;
+                label2.Text = "직진";
+            }
+            else if (next == 2)//오른쪽
+            {
+                button3.BackColor = Color.FromArgb(16, 207, 51);
+                if ((nextangle) < 70)
+                    button2.BackColor = Color.FromArgb(16, 207, 51);
+                else
+                    button2.BackColor = SystemColors.Control;
+                button1.BackColor = SystemColors.Control;
+
+                if (nextangle < 0)
+                    label2.Text = "우 : " + (-nextangle).ToString() + "º";
+                else
+                    label2.Text = "우 : " + (90 - nextangle).ToString() + "º";
+            }
+            else if (next == 5) //진행방향 안잡힘
+            {
+                button2.BackColor = SystemColors.Control;
+                button1.BackColor = SystemColors.Control;
+                button3.BackColor = SystemColors.Control;
+                label2.Text = " ";
+            }
+
+            if(left_flag >= 2)
+            {
+                direction = -1;
+                left_flag = 0;
+                button14.Text = "direction : " + direction;
+            }
+            if(right_flag >= 2)
+            {
+                direction = 1;
+                right_flag = 0;
+                button14.Text = "direction : " + direction;
+            }
+
+
+            #endregion 방향 표시 버튼
+            
+            if(sw1.Elapsed.Seconds > 10)
+            {
+                #region 원 찾기
+                UMat cannyEdges_circle = new UMat();
+                circle._ThresholdBinary(new Gray(120), new Gray(255));
+                circle._Erode(5);//침식
+                circle._Dilate(5);//팽창
+                FindLargestContour(circle.Canny(mCannyParam, mCannyParam), circle);
+                CvInvoke.Canny(circle, cannyEdges_circle, cannyThreshold, cannyThresholdLinking);
+                CircleF[] circles = CvInvoke.HoughCircles(cannyEdges_circle, HoughType.Gradient, 2.0, 200.0, cannyThreshold, circleAccumulatorThreshold, 10);
+                Mat circleImage = new Mat(circle.Size, DepthType.Cv8U, 3);
+                circleImage.SetTo(new MCvScalar(0));
+                foreach (CircleF draw_circle in circles)
+                {
+                    CvInvoke.Circle(BgrOImage, System.Drawing.Point.Round(draw_circle.Center), (int)draw_circle.Radius, new Bgr(Color.Brown).MCvScalar, 2);
+                    if (find_Circle == false)
+                    {
+                        x = System.Drawing.Point.Round(draw_circle.Center).X;
+                        y = System.Drawing.Point.Round(draw_circle.Center).Y;
+                        find_Circle = true;
+                    }
+                }
+                #endregion
+            }
+
+
+            #region 이미지박스, 텍스트박스
+            // imageBox12.Image = lineImage_pink + lineImage_red + lineImage_green + lineImage_pink2 + BgrOImage + lineImage_green2;
+            imageBox12.Image = lineImage_pink + BgrOImage + lineImage_pink_right;
+
+            //   imageBox12.Image = lineImage_pink_right+ BgrOImage + lineImage_pink_right;
+
+            #endregion 이미지박스, 텍스트박스
+
+
+
+        }
+
+        public static void FindLargestContour(IInputOutputArray cannyEdges, IInputOutputArray result)
+        {
+            int largest_contour_index = 0;
+            double largest_area = 0;
+
+            using (Mat hierachy = new Mat())
+            using (VectorOfVectorOfPoint contours = new VectorOfVectorOfPoint())
+            {
+                CvInvoke.FindContours(cannyEdges, contours, hierachy, RetrType.Tree, ChainApproxMethod.ChainApproxNone);
+
+                for (int i = 0; i < contours.Size; i++)
+                {
+                    MCvScalar color = new MCvScalar(0, 0, 200);
+
+                    double a = CvInvoke.ContourArea(contours[i], false);  //  Find the area of contour
+                    if (a > largest_area)
+                    {
+                        largest_area = a;
+                        largest_contour_index = i;                //Store the index of largest contour
+                    }
+                    CvInvoke.DrawContours(result, contours, largest_contour_index, new MCvScalar(255, 255, 255), 1, LineType.EightConnected);
+
+                }
+
+                //CvInvoke.DrawContours(result, contours, largest_contour_index, new MCvScalar(0, 0, 255), 3, LineType.EightConnected, hierachy);
+                //largestContour = new VectorOfPoint(contours[largest_contour_index].ToArray());
+            }
+        }
+
+        private void btnPlay_Click(object sender, EventArgs e)
+        {
+            if (radioButton1.Checked)
+            {
+                Source = new VideoCapture(@"rtsp://192.168.100.1/cam1/mpeg4");
+                mission2_flag = 1;
+            }
+
+            if (radioButton2.Checked)
+                Source = new VideoCapture(@"test.mkv");
+
+            if (radioButton3.Checked)
+                Source = new VideoCapture(0);
+            Application.Idle += ImageProcessing;
+        }
+
+        private void btnPause_Click(object sender, EventArgs e)
+        {
+            Application.Idle -= ImageProcessing;
+        }
+
+
+        #endregion  ############################################# 영상처리 ##########################3
+    }
+    public class KalmanFilter
+    {
+        private double Q = 0.00001;
+        private double R = 0.001;
+        private double X = 0, P = 1, K;
+
+        public KalmanFilter(double initVal)
+        {
+            X = initVal;
+        }
+
+        private void measurementUpdate()
+        {
+            K = (P + Q) / (P + Q + R);
+            P = R * (P + Q) / (R + P + Q);
+        }
+
+        public double Update(double measurement)
+        {
+            measurementUpdate();
+            X = X + (measurement - X) * K;
+
+            return X;
+        }
+    }
+}
